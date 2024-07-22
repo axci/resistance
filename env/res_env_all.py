@@ -59,6 +59,11 @@ class ResistanceFinalEnv:
         self.share_observation_space = MultiBinary(420)
         self.action_space = Discrete(25)
 
+        # FOR Good players
+        self.observation_space_good = MultiBinary(420)
+        self.share_observation_space_good = MultiBinary(415)
+        self.action_space_good = Discrete(24)
+
     def reset(self):
         self.good_players = self.assign_roles()
         self.evil_players = [agent_id for agent_id in self._agent_ids if agent_id not in self.good_players]
@@ -79,7 +84,7 @@ class ResistanceFinalEnv:
         obs = { agent_id: self._get_obs(agent_id) for agent_id in self._agent_ids }
         available_actions = { agent_id: self._get_available_actions(agent_id) for agent_id in self._agent_ids }
         share_obs = { agent_id: self._get_share_obs(agent_id) for agent_id in self._agent_ids }
-        info = self._get_info(obs)
+        info = None #self._get_info(obs)
 
         # Convert to 2-d numpy array:
         #obs_array = self._convert_dict_2d_array(obs)
@@ -134,7 +139,7 @@ class ResistanceFinalEnv:
         obs = { agent_id: self._get_obs(agent_id) for agent_id in self._agent_ids }
         available_actions = { agent_id: self._get_available_actions(agent_id) for agent_id in self._agent_ids }
         share_obs = { agent_id: self._get_share_obs(agent_id) for agent_id in self._agent_ids }
-        info = self._get_info(obs)
+        info = None #self._get_info(obs)
 
         # convert to numpy arrays
         #obs_array = self._convert_dict_2d_array(obs)
@@ -337,7 +342,6 @@ class ResistanceFinalEnv:
             }
         return info
 
-
     def phase_0(self, team: list, verbose=False):
         """ 
         Decision maker: 1 player (Leader).
@@ -476,7 +480,7 @@ class ResistanceFinalEnv:
         #     roles[evil_players] = 1
         
         good_players = np.random.choice(self._agent_ids, self.num_good, replace=False)
-        return list(good_players)
+        return [agent_id for agent_id in self._agent_ids if agent_id in good_players] 
         
     def _encoding_number(self, number: int, max_number: int) -> list:
         """
@@ -488,7 +492,7 @@ class ResistanceFinalEnv:
     
     def _encoding_player(self, agent_id: str) -> list:
         """
-        One-hot encoding
+        player_2 -> [0, 1, 0, 0, 0]
         """
         player_id = int(agent_id[-1]) - 1
         return self._encoding_number(player_id , self.num_players)
@@ -501,6 +505,14 @@ class ResistanceFinalEnv:
         if fail_vote == 2:
             encoded_quest_vote = [1, 0, 0]
         return encoded_quest_vote
+    
+    def _is_in_quest_team(self, agent_id: str) -> bool:
+        player_id = int(agent_id[-1]) - 1
+        if self.quest_team[player_id] == 1:
+            return True
+        else:
+            return False
+    
 
     def _get_start_history(self) -> dict:
         """

@@ -177,7 +177,7 @@ class MAPPOTrainer():
         """
         # Sample
         share_obs_batch, obs_batch, actions_batch, value_preds_batch, return_batch, \
-        masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch = sample
+        old_action_log_probs_batch, adv_targ, available_actions_batch = sample
         
         # convert to torch.Tensor if necessary
         old_action_log_probs_batch = check_array(old_action_log_probs_batch).to(**self.tpdv)

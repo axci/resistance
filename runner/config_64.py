@@ -5,11 +5,11 @@ class Args:
         self.algorithm_name = 'MAPPO'
         self.experiment_name = 'Res Experience'
         self.use_centralized_V = True
-        self.num_env_steps = 15_000_000
+        self.num_env_steps = 10_000_000
         self.episode_length = 10_000
         self.n_rollout_threads = 1
         self.use_linear_lr_decay = False
-        self.hidden_size = 512 #64
+        self.hidden_size = 64
         self.gamma = .99
         self.gae_lambda = .95
         self._use_gae = True
@@ -30,6 +30,6 @@ class Args:
         self.use_orthogonal = True
         self.use_feature_normalization = True
         self.use_ReLU = True
-        self.layer_N = 2 #1
+        self.layer_N = 1
         self.log_interval = 100_000  # log every x steps
         

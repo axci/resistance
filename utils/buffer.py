@@ -89,19 +89,20 @@ class SharedReplayBuffer(object):
         ), dtype=np.float32)
         
         # Initialize the buffer for masks (1 if ongoing, 0 if terminated)
-        self.masks = np.ones((  
-            self.episode_length + 1, 
-            self.n_rollout_threads, 
-            num_agents, 
-            1
-        ), dtype=np.float32)
+        # self.masks = np.ones((  
+        #     self.episode_length + 1, 
+        #     self.n_rollout_threads, 
+        #     num_agents, 
+        #     1
+        # ), dtype=np.float32)
 
         self.step = 0
 
     def insert(self, share_obs: np.ndarray, obs: np.ndarray, 
                actions: np.ndarray, action_log_probs: np.ndarray, 
                value_preds: np.ndarray, rewards: np.ndarray, 
-               masks: np.ndarray, available_actions: np.ndarray=None):
+               #masks: np.ndarray, 
+               available_actions: np.ndarray=None):
         """
         Insert data into the buffer.
         Parameters:
@@ -119,7 +120,7 @@ class SharedReplayBuffer(object):
         self.action_log_probs[self.step] = action_log_probs.copy()
         self.value_preds[self.step] = value_preds.copy()
         self.rewards[self.step] = rewards.copy()
-        self.masks[self.step + 1] = masks.copy()
+        #self.masks[self.step + 1] = masks.copy()
         if available_actions is not None:
             self.available_actions[self.step + 1] = available_actions.copy()
 
@@ -127,7 +128,9 @@ class SharedReplayBuffer(object):
         self.step = (self.step + 1) % self.episode_length
 
     def chooseinsert(self, share_obs, obs, actions, action_log_probs,
-                     value_preds, rewards, masks, available_actions=None):
+                     value_preds, rewards, 
+                     #masks, 
+                     available_actions=None):
         """
         Insert data into the buffer. For turn based.
         Parameters:
@@ -145,7 +148,7 @@ class SharedReplayBuffer(object):
         self.action_log_probs[self.step] = action_log_probs.copy()
         self.value_preds[self.step] = value_preds.copy()
         self.rewards[self.step] = rewards.copy()
-        self.masks[self.step + 1] = masks.copy()
+        #self.masks[self.step + 1] = masks.copy()
         if available_actions is not None:
             self.available_actions[self.step] = available_actions.copy()
 
@@ -155,13 +158,9 @@ class SharedReplayBuffer(object):
         """Copy last timestep data to first index. Called after update to model."""
         self.share_obs[0] = self.share_obs[-1].copy()
         self.obs[0] = self.obs[-1].copy()
-        self.masks[0] = self.masks[-1].copy()
+        #self.masks[0] = self.masks[-1].copy()
         if self.available_actions is not None:
             self.available_actions[0] = self.available_actions[-1].copy()
-
-    def chooseafter_update(self):
-        """Copy last timestep data to first index. This method is used for Hanabi."""
-        self.masks[0] = self.masks[-1].copy()
 
     def compute_returns(self, next_value):
         """
@@ -173,17 +172,16 @@ class SharedReplayBuffer(object):
             gae = 0
             for step in reversed(range(self.rewards.shape[0])):
                 # Compute the temporal difference error
-                delta = self.rewards[step] + self.gamma * self.value_preds[step + 1] * \
-                        self.masks[step + 1] - self.value_preds[step]
+                delta = self.rewards[step] + self.gamma * self.value_preds[step + 1] - self.value_preds[step]
                 # Accumulate the GAE
-                gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
+                gae = delta + self.gamma * self.gae_lambda * gae
                 # Compute the return
                 self.returns[step] = gae + self.value_preds[step]
         else:  # Assign the value prediction for the step after the last episode step
             self.returns[-1] = next_value
             for step in reversed(range(self.rewards.shape[0])):
                 # Compute the discounted return
-                self.returns[step] = self.returns[step + 1] * self.gamma * self.masks[step + 1] + self.rewards[step]
+                self.returns[step] = self.returns[step + 1] * self.gamma + self.rewards[step]
     
     def feed_forward_generator_transformer(self, advantages, num_mini_batch=None, mini_batch_size=None):
         """
@@ -241,8 +239,8 @@ class SharedReplayBuffer(object):
         value_preds = value_preds[rows, cols]
         returns = self.returns[:-1].reshape(-1, *self.returns.shape[2:])
         returns = returns[rows, cols]
-        masks = self.masks[:-1].reshape(-1, *self.masks.shape[2:])
-        masks = masks[rows, cols]
+        #masks = self.masks[:-1].reshape(-1, *self.masks.shape[2:])
+        #masks = masks[rows, cols]
         action_log_probs = self.action_log_probs.reshape(-1, *self.action_log_probs.shape[2:])
         action_log_probs = action_log_probs[rows, cols]
         advantages = advantages.reshape(-1, *advantages.shape[2:])
@@ -259,14 +257,14 @@ class SharedReplayBuffer(object):
                 available_actions_batch = None
             value_preds_batch = value_preds[indices].reshape(-1, *value_preds.shape[2:])
             return_batch = returns[indices].reshape(-1, *returns.shape[2:])
-            masks_batch = masks[indices].reshape(-1, *masks.shape[2:])
+            #masks_batch = masks[indices].reshape(-1, *masks.shape[2:])
             old_action_log_probs_batch = action_log_probs[indices].reshape(-1, *action_log_probs.shape[2:])
             if advantages is None:
                 adv_targ = None
             else:
                 adv_targ = advantages[indices].reshape(-1, *advantages.shape[2:])
 
-            yield share_obs_batch, obs_batch, actions_batch, value_preds_batch, return_batch, masks_batch, \
+            yield share_obs_batch, obs_batch, actions_batch, value_preds_batch, return_batch, \
                   old_action_log_probs_batch, adv_targ, available_actions_batch
 
     def feed_forward_generator(self, advantages, num_mini_batch=None, mini_batch_size=None):
@@ -299,7 +297,7 @@ class SharedReplayBuffer(object):
             available_actions = self.available_actions[:-1].reshape(-1, self.available_actions.shape[-1])
         value_preds = self.value_preds[:-1].reshape(-1, 1)
         returns = self.returns[:-1].reshape(-1, 1)
-        masks = self.masks[:-1].reshape(-1, 1)
+        #masks = self.masks[:-1].reshape(-1, 1)
         action_log_probs = self.action_log_probs.reshape(-1, self.action_log_probs.shape[-1])
         advantages = advantages.reshape(-1, 1)
 
@@ -314,12 +312,12 @@ class SharedReplayBuffer(object):
                 available_actions_batch = None
             value_preds_batch = value_preds[indices]
             return_batch = returns[indices]
-            masks_batch = masks[indices]
+            #masks_batch = masks[indices]
             old_action_log_probs_batch = action_log_probs[indices]
             if advantages is None:
                 adv_targ = None
             else:
                 adv_targ = advantages[indices]
 
-            yield share_obs_batch, obs_batch, actions_batch, value_preds_batch, return_batch, masks_batch, \
+            yield share_obs_batch, obs_batch, actions_batch, value_preds_batch, return_batch, \
                   old_action_log_probs_batch, adv_targ, available_actions_batch
