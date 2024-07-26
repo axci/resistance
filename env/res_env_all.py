@@ -46,8 +46,10 @@ class ResistanceFinalEnv:
         self.num_evil = self.num_players - self.num_good
         self.num_players_for_quest = [2, 3, 2, 3, 3]
         self.num_fails_for_quest   = [1, 1, 1, 1, 1]
-        self.reward_win_bonus = 10
-        self.reward_completed_quest_bonus = 1
+        self.reward_win_bonus = 1 #50
+        self.reward_completed_quest_bonus = 0 #0.1  # 1
+        self.reward_team_voting = 0.1  # 1
+        self.reward_team_selection = 0.15
 
         self._agent_ids = [f"player_{i}" for i in range(1, self.num_players + 1)]
         #self.roles: dict = self.assign_roles()
@@ -56,12 +58,12 @@ class ResistanceFinalEnv:
         self.phase = 0
 
         self.observation_space = MultiBinary(425)
-        self.share_observation_space = MultiBinary(420)
+        self.share_observation_space = MultiBinary(425)  # 420
         self.action_space = Discrete(25)
 
         # FOR Good players
         self.observation_space_good = MultiBinary(420)
-        self.share_observation_space_good = MultiBinary(415)
+        self.share_observation_space_good = MultiBinary(420) # 415
         self.action_space_good = Discrete(24)
 
     def reset(self):
@@ -77,13 +79,14 @@ class ResistanceFinalEnv:
         self.voting_attempt = 1
         self.cum_quest_fails = 0
         self.history = self._get_start_history()
+        self.reward_penalty = 0
         self.good_victory = False
         self.done = False
         self.turn_count = 0
 
         obs = { agent_id: self._get_obs(agent_id) for agent_id in self._agent_ids }
         available_actions = { agent_id: self._get_available_actions(agent_id) for agent_id in self._agent_ids }
-        share_obs = { agent_id: self._get_share_obs(agent_id) for agent_id in self._agent_ids }
+        share_obs = { agent_id: self._get_obs(agent_id) for agent_id in self._agent_ids }
         info = None #self._get_info(obs)
 
         # Convert to 2-d numpy array:
@@ -98,11 +101,18 @@ class ResistanceFinalEnv:
         if self.phase == 0:
             for agent_id, action in action_dict.items():
                 if action != 0:
+                    leader = agent_id
                     team = self._action_to_array(action)
                     if verbose:
                         print(f'Player chose an Action {action} - team {team}')
                     self.phase_0(team, verbose=verbose)
-        
+                    # Rewards
+                    if leader in self.good_players:
+                        if self._is_evil_in_quest_team():
+                            rewards[leader] = -self.reward_team_selection * self.round
+                        else:
+                            rewards[leader] =  self.reward_team_selection * self.round
+                        
         elif self.phase == 1:
             vote_action = [0] * 5
             for agent_id, action in action_dict.items():
@@ -111,7 +121,18 @@ class ResistanceFinalEnv:
             if verbose:
                 print('Team Votes:', vote_action)
             self.phase_1(vote_action, verbose=verbose)
-        
+            # Rewards for Good Players
+     
+            for good_player in self.good_players:
+                # If you vote APPROVE and only Goods in Team
+                if action_dict[good_player] == 21 and self._is_evil_in_quest_team() == False:
+                    rewards[good_player] = self.reward_team_voting * self.round
+                # If you vote REJECT and Evil in Team
+                elif action_dict[good_player] == 22 and self._is_evil_in_quest_team() == True:
+                    rewards[good_player] = self.reward_team_voting * self.round
+                else:
+                    rewards[good_player] = -self.reward_team_voting * 1.5 * self.round  # double penalty
+    
         elif self.phase == 2:
             vote_action = 0
             for agent_id, action in action_dict.items():
@@ -133,12 +154,12 @@ class ResistanceFinalEnv:
             if self.good_victory:
                 rewards = { agent_id:  self.reward_win_bonus if agent_id in self.good_players else -self.reward_win_bonus for agent_id in self._agent_ids }
             else:
-                rewards = { agent_id: -self.reward_win_bonus if agent_id in self.good_players else  self.reward_win_bonus for agent_id in self._agent_ids }
+                rewards = { agent_id: -self.reward_win_bonus - self.reward_penalty if agent_id in self.good_players else  self.reward_win_bonus for agent_id in self._agent_ids }
         
         # Get obs and available actions
         obs = { agent_id: self._get_obs(agent_id) for agent_id in self._agent_ids }
         available_actions = { agent_id: self._get_available_actions(agent_id) for agent_id in self._agent_ids }
-        share_obs = { agent_id: self._get_share_obs(agent_id) for agent_id in self._agent_ids }
+        share_obs = { agent_id: self._get_obs(agent_id) for agent_id in self._agent_ids }
         info = None #self._get_info(obs)
 
         # convert to numpy arrays
@@ -180,7 +201,6 @@ class ResistanceFinalEnv:
             return np.array(history_flattened + knowledge)
         else:
             return np.array(history_flattened)
-
 
     def _get_available_actions(self, agent_id) -> np.ndarray:
         if agent_id in self.evil_players:
@@ -369,6 +389,10 @@ class ResistanceFinalEnv:
 
         # Change Leader:
         self._change_leader()
+        # Update History?
+        if self.voting_attempt != 5:
+            self.history[f"round {self.round}"][f"attempt {self.voting_attempt + 1}"][:5] = self._encoding_player(self.leader)
+
 
     def phase_1(self, votes: list, verbose=False):
         assert len(votes) == self.num_players, f"Number of votes ({len(votes)}) does not match the number of players ({self.num_players})."
@@ -405,6 +429,7 @@ class ResistanceFinalEnv:
             
             # Evil wins the game if 5 teams are rejected in a single round 
             if self.voting_attempt == 6:
+                self.reward_penalty = 0.5
                 self.done = True  # XXXXXXXXXXX END OF THE GAME XXXXXXXXXXXX
                 self.good_victory = False
                 self.phase = 1
@@ -513,6 +538,12 @@ class ResistanceFinalEnv:
         else:
             return False
     
+    def _is_evil_in_quest_team(self):
+        for evil_player in self.evil_players:
+            evil_player_idx = int(evil_player[-1]) - 1
+            if self.quest_team[evil_player_idx] == 1:
+                return True
+        return False
 
     def _get_start_history(self) -> dict:
         """

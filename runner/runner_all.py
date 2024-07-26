@@ -2,12 +2,17 @@ import time
 import torch
 import os
 from typing import Tuple
+from tqdm import tqdm
 
 import numpy as np
 import matplotlib.pyplot as plt
 
+from env.res_env_all import ResistanceFinalEnv
+from env.naive_agents import NaiveEvilPolicy
+from runner.game import simulate_game
 from utils.buffer import SharedReplayBuffer
 from alg.mappo import MAPPOTrainer, MAPPOPolicy
+
 
 
 class RunnerMA_Both:
@@ -94,6 +99,9 @@ class RunnerMA_Both:
             print('===')
 
     def run(self, verbose=False):
+        print('Start training.')
+        print(f"Config. Hidden sizes: {self.all_args.hidden_sizes_list}")
+
         #self.warmup(verbose=verbose)
         train_infos_evil_history = []
         train_infos_good_history = []
@@ -111,7 +119,7 @@ class RunnerMA_Both:
                 self.trainer_evil.policy.lr_decay(episode, episodes)
                 self.trainer_good.policy.lr_decay(episode, episodes)
 
-            for step in range(self.episode_length):  # Max length for any episode
+            for step in tqdm(range(self.episode_length)):  # Max length for any episode
                 # (1) sample action               
                 values_evil, actions_evil, action_log_probs_evil, action_probs_evil, \
                     values_good, actions_good, action_log_probs_good, action_probs_good, actions_env = self.collect(step)
@@ -153,6 +161,15 @@ class RunnerMA_Both:
             # post process
             total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
 
+            # Save
+            if episode % 10 == 0:
+                print('Policy is saved.')
+                self.save('temp')
+
+            # if np.mean(self.buffer_good.rewards) > -0.1:
+            #     good_reward_av = np.mean(self.buffer_good.rewards)
+            #     self.save(f'256_2_good_rew_{good_reward_av}')
+
             # log info
             if total_num_steps % self.log_interval == 0:
                 end = time.time()
@@ -172,6 +189,10 @@ class RunnerMA_Both:
                           np.mean(self.buffer_evil.rewards),
                           np.mean(self.buffer_good.rewards),
                           ))
+                
+            # evaluation
+            if total_num_steps % (self.log_interval*10) == 0:
+                self.eval_good(100)
 
         plt.figure()
         plt.plot(train_infos_evil_history)
@@ -340,12 +361,36 @@ class RunnerMA_Both:
                     else:
                         counter_wins_evil += 1
 
-            print(f"Episode {episode + 1}, Number of steps: {counter_step}")
-            print('=======  EPISODE END  ================')
-            print('')
+            #print(f"Episode {episode + 1}, Number of steps: {counter_step}")
+            #print('=======  EPISODE END  ================')
+            #print('')
 
         print(f"Good Win Rate: {counter_wins_good / num_games}")
         print(f"Evil Win Rate: {counter_wins_evil / num_games}")
+    
+    @torch.no_grad()
+    def eval_good(self, num_games=100):
+        counter_wins_good = 0
+        number_of_turns = 0
+        number_of_success = 0
+        game_config = {
+            0: self.trainer_good.policy,
+            1: NaiveEvilPolicy()
+        }
+        env = ResistanceFinalEnv()
+        for episode in range(num_games):
+            stat = simulate_game(env, game_config)
+            counter_wins_good += stat['good victory']
+            number_of_turns  += stat['number of turns']
+            if stat['good victory'] == 1:
+                number_of_success += 3
+            else:
+                number_of_success += (stat['number of rounds'] - 3)
+        print('Good Victories Rate', counter_wins_good / num_games)
+        print('Av number of turns', number_of_turns/ num_games)
+        print('Av number of succ Quests', number_of_success/ num_games)
+
+
 
     def save(self, version=''):
         """
